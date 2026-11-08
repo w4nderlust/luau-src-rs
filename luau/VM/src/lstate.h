@@ -305,6 +305,7 @@ struct lua_State
 {
     CommonHeader;
     uint8_t status;
+    uint8_t debugProtectedErrorStatus;
 
     uint8_t activememcat; // memory category that is used for new GC object allocations
 

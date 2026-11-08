@@ -165,6 +165,7 @@ void lua_resetthread(lua_State* L)
         luaD_reallocCI(L, BASIC_CI_SIZE);
     // clear thread state
     L->status = LUA_OK;
+    L->debugProtectedErrorStatus = LUA_OK;
     L->base = L->ci->base;
     L->top = L->ci->base;
     L->nCcalls = L->baseCcalls = 0;

@@ -565,6 +565,13 @@ LUA_API int lua_hascustomexecution(lua_State* L, int level); // function has cus
 LUA_API int lua_incustomexecution(lua_State* L, int level);  // function is running using custom execution
 
 LUA_API void lua_singlestep(lua_State* L, int enabled);
+// Move a suspended interpreted thread between marked statements in the same function and local scope.
+LUA_API int lua_debugjumptoline(lua_State* L, int line);
+// Original status of a protected error during its pre-handler callback or while that error is suspended.
+// Returns LUA_OK otherwise. A paused runtime error is rethrown by a zero-argument resume.
+LUA_API int lua_debugprotectederrorstatus(lua_State* L);
+// Stack level of the protected call, or -1 when none is active.
+LUA_API int lua_debugprotectedhandler(lua_State* L);
 LUA_API int lua_breakpoint(lua_State* L, int funcindex, int line, int enabled);
 
 // returns 1 if execution is currently at a breakpoint; should only be called from debug callbacks

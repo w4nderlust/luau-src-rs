@@ -126,6 +126,7 @@ static BytecodeBuilder::StringRef sref(AstArray<const char> data)
 struct Compiler
 {
     struct RegScope;
+    struct DebugScope;
 
     Compiler(BytecodeBuilder& bytecode, const CompileOptions& options, AstNameTable& names)
         : bytecode(bytecode)
@@ -495,6 +496,7 @@ struct Compiler
             buildExportTableShape();
 
         RegScope rs(this);
+        DebugScope debugScope(this);
 
         bool self = func->self != 0;
         uint32_t fid = bytecode.beginFunction(uint8_t(self + func->args.size), func->vararg);
@@ -4121,6 +4123,7 @@ struct Compiler
         AstStatBlock* body = stat->body;
 
         RegScope rs(this);
+        DebugScope debugScope(this);
 
         bool continueValidated = false;
         size_t conditionLocals = 0;
@@ -5012,6 +5015,9 @@ struct Compiler
     {
         setDebugLine(node);
 
+        if (debugScopeId && needsCoverage(node) && !node->is<AstStatTypeFunction>())
+            bytecode.emitABC(LOP_NOP, uint8_t(LUAU_DEBUG_STATEMENT_MARKER >> 8), uint8_t(debugScopeId), uint8_t(debugScopeId >> 8));
+
         if (options.coverageLevel >= 1 && needsCoverage(node))
         {
             bytecode.emitABC(LOP_COVERAGE, 0, 0, 0);
@@ -5020,6 +5026,7 @@ struct Compiler
         if (AstStatBlock* stat = node->as<AstStatBlock>())
         {
             RegScope rs(this);
+            DebugScope debugScope(this);
 
             size_t oldLocals = localStack.size();
             if (FFlag::LuauExportValueSyntax)
@@ -5909,6 +5916,27 @@ struct Compiler
         }
     };
 
+    struct DebugScope
+    {
+        Compiler* self;
+        uint16_t previousId;
+
+        explicit DebugScope(Compiler* self)
+            : self(self)
+            , previousId(self->debugScopeId)
+        {
+            if (self->options.debugLevel >= 2 && self->options.optimizationLevel == 0 && self->nextDebugScopeId < 0xffff)
+                self->debugScopeId = ++self->nextDebugScopeId;
+            else
+                self->debugScopeId = 0;
+        }
+
+        ~DebugScope()
+        {
+            self->debugScopeId = previousId;
+        }
+    };
+
     struct RegScope
     {
         RegScope(Compiler* self)
@@ -6032,6 +6060,9 @@ struct Compiler
 
     const DenseHashMap<AstExprCall*, int>* builtinsFold = nullptr;
     bool builtinsFoldLibraryK = false;
+
+    uint16_t debugScopeId = 0;
+    uint16_t nextDebugScopeId = 0;
 
     // compileFunction state, gets reset for every function
     unsigned int regTop = 0;

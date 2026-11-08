@@ -509,6 +509,10 @@ enum LuauOpcode
     LOP__COUNT
 };
 
+// Compiler marker for a complete source statement in a debug function.
+#define LUAU_DEBUG_STATEMENT_MARKER 0x4200u
+#define LUAU_IS_DEBUG_STATEMENT(insn) (((insn) & 0xff00u) == LUAU_DEBUG_STATEMENT_MARKER)
+
 // Bytecode instruction header: it's always a 32-bit integer, with low byte (first byte in little endian) containing the opcode
 // Some instruction types require more data and have more 32-bit integers following the header
 #define LUAU_INSN_OP(insn) ((insn) & 0xff)

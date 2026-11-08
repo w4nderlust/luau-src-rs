@@ -10,6 +10,8 @@
 #include "lbytecode.h"
 #include "lvm.h"
 
+#include "Luau/BytecodeUtils.h"
+
 #include <string.h>
 #include <stdio.h>
 
@@ -42,6 +44,54 @@ static int currentline(lua_State* L, CallInfo* ci)
 static Proto* getluaproto(CallInfo* ci)
 {
     return cast_to(Proto*, ci->p);
+}
+
+static LuauOpcode originalOpcode(Proto* p, int pc)
+{
+    return LuauOpcode(p->debuginsn ? p->debuginsn[pc] : LUAU_INSN_OP(p->code[pc]));
+}
+
+int lua_debugjumptoline(lua_State* L, int line)
+{
+    CallInfo* ci = L->ci;
+    if ((L->status != LUA_YIELD && L->status != LUA_BREAK) || ci == L->base_ci || !ci->p || !ci->savedpc ||
+        (ci->flags & (LUA_CALLINFO_NATIVE | LUA_CALLINFO_OPYIELD)))
+        return 0;
+
+    Proto* p = ci->p;
+    auto isStatement = [p](int pc) -> bool
+    {
+        return originalOpcode(p, pc) == LOP_NOP && LUAU_IS_DEBUG_STATEMENT(p->code[pc]);
+    };
+
+    int source = int(ci->savedpc - p->code);
+    if (source < 0 || source >= p->sizecode || !isStatement(source))
+        return 0;
+
+    int target = -1;
+    for (int pc = 0; pc < p->sizecode; pc += Luau::getOpLength(originalOpcode(p, pc)))
+    {
+        if (isStatement(pc) && luaG_getline(p, pc) == line)
+        {
+            if (target != -1)
+                return 0; // more than one statement starts on this line
+            target = pc;
+        }
+    }
+    if (target < 0 || (p->code[source] >> 16) != (p->code[target] >> 16))
+        return 0;
+
+    for (int i = 0; i < p->sizelocvars; ++i)
+    {
+        const LocVar& local = p->locvars[i];
+        bool liveAtSource = local.startpc <= source && source < local.endpc;
+        bool liveAtTarget = local.startpc <= target && target < local.endpc;
+        if (liveAtSource != liveAtTarget)
+            return 0;
+    }
+
+    ci->savedpc = p->code + target;
+    return 1;
 }
 
 int lua_getargument(lua_State* L, int level, int n)
@@ -396,10 +446,11 @@ void luaG_breakpoint(lua_State* L, Proto* p, int line, bool enable)
     // since native code doesn't support breakpoints, we would need to update all call frames with LUAU_CALLINFO_NATIVE that refer to p
     if (p->lineinfo && (ondisable || !p->execdata))
     {
-        for (int i = 0; i < p->sizecode; ++i)
+        for (int i = 0; i < p->sizecode; i += Luau::getOpLength(originalOpcode(p, i)))
         {
-            // note: we keep prologue as is, instead opting to break at the first meaningful instruction
-            if (LUAU_INSN_OP(p->code[i]) == LOP_PREPVARARGS)
+            // Prologues, AUX words and closure captures are not independently executable.
+            const LuauOpcode op = originalOpcode(p, i);
+            if (op == LOP_PREPVARARGS || op == LOP_CAPTURE)
                 continue;
 
             if (luaG_getline(p, i) != line)
@@ -413,12 +464,12 @@ void luaG_breakpoint(lua_State* L, Proto* p, int line, bool enable)
                     p->debuginsn[j] = LUAU_INSN_OP(p->code[j]);
             }
 
-            uint8_t op = enable ? LOP_BREAK : LUAU_INSN_OP(p->debuginsn[i]);
+            uint8_t replacementOp = enable ? LOP_BREAK : LUAU_INSN_OP(p->debuginsn[i]);
 
             // patch just the opcode byte, leave arguments alone
             p->code[i] &= ~0xff;
-            p->code[i] |= op;
-            LUAU_ASSERT(LUAU_INSN_OP(p->code[i]) == op);
+            p->code[i] |= replacementOp;
+            LUAU_ASSERT(LUAU_INSN_OP(p->code[i]) == replacementOp);
 
             if (FFlag::LuauSkipDebugLocked && enable)
                 p->execflags |= PEF_DEBUGLOCKED;
@@ -516,10 +567,11 @@ static int getnextline(Proto* p, int line)
 
     if (p->lineinfo)
     {
-        for (int i = 0; i < p->sizecode; ++i)
+        for (int i = 0; i < p->sizecode; i += Luau::getOpLength(originalOpcode(p, i)))
         {
-            // note: we keep prologue as is, instead opting to break at the first meaningful instruction
-            if (LUAU_INSN_OP(p->code[i]) == LOP_PREPVARARGS)
+            // Prologues, AUX words and closure captures are not independently executable.
+            const LuauOpcode op = originalOpcode(p, i);
+            if (op == LOP_PREPVARARGS || op == LOP_CAPTURE)
                 continue;
 
             int candidate = luaG_getline(p, i);

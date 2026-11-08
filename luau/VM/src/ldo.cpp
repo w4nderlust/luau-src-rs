@@ -760,6 +760,17 @@ static int resume_start(lua_State* L, lua_State* from, int nargs)
     return LUA_OK;
 }
 
+int lua_debugprotectederrorstatus(lua_State* L)
+{
+    return L->debugProtectedErrorStatus;
+}
+
+int lua_debugprotectedhandler(lua_State* L)
+{
+    CallInfo* handler = resume_findhandler(L);
+    return handler ? int(L->ci - handler) : -1;
+}
+
 static int resume_finish(lua_State* L, int status, int oldnCcalls)
 {
     CallInfo* ch = NULL;
@@ -767,14 +778,18 @@ static int resume_finish(lua_State* L, int status, int oldnCcalls)
     {
         if (lua_isyieldable(L) != 0 && L->global->cb.debugprotectederror)
         {
+            uint8_t previousStatus = L->debugProtectedErrorStatus;
+            L->debugProtectedErrorStatus = cast_byte(status);
             L->global->cb.debugprotectederror(L);
 
-            // debug hook is only allowed to break
+            // Keep the original error on the paused stack so the next resume
+            // can run the same protected handler with the same error object.
             if (L->status == LUA_BREAK)
             {
                 status = LUA_OK;
                 break;
             }
+            L->debugProtectedErrorStatus = previousStatus;
         }
 
         // restore the baseline we established in resume_start
@@ -813,6 +828,9 @@ static int resume_finish(lua_State* L, int status, int oldnCcalls)
 // pop always executes.
 int lua_resume(lua_State* L, lua_State* from, int nargs)
 {
+    if (L->status == LUA_BREAK && L->debugProtectedErrorStatus == LUA_ERRRUN && nargs == 0)
+        return lua_resumeerror(L, from);
+
     if (int starterror = resume_start(L, from, nargs))
         return starterror;
 
@@ -835,6 +853,8 @@ int lua_resumeerror(lua_State* L, lua_State* from)
 {
     if (int starterror = resume_start(L, from, 1))
         return starterror;
+
+    L->debugProtectedErrorStatus = LUA_OK;
 
     if (LUAU_UNLIKELY(!!L->global->cb.preresume))
         L->global->cb.preresume(L);

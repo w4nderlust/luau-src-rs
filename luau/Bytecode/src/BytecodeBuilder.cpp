@@ -1586,6 +1586,10 @@ void BytecodeBuilder::validateInstructions() const
 
         switch (op)
         {
+        case LOP_NOP:
+            LUAU_ASSERT(insn == 0 || LUAU_IS_DEBUG_STATEMENT(insn));
+            break;
+
         case LOP_LOADNIL:
             VREG(LUAU_INSN_A(insn));
             break;

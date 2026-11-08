@@ -340,7 +340,7 @@ reentry:
             VM_CASE(LOP_NOP)
             {
                 VM_CASE_INSTRUCTION insn = *pc++;
-                LUAU_ASSERT(insn == 0);
+                LUAU_ASSERT(insn == 0 || LUAU_IS_DEBUG_STATEMENT(insn));
                 VM_NEXT();
             }
 
